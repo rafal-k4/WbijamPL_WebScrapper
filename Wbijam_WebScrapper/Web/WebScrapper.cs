@@ -43,31 +43,39 @@ public class WebScrapper : IWebScrapper
 
         _logger.Information("{anime_count} animes found", animeAnchors.Length);
 
-        foreach (var animeAnchor in animeAnchors)
+        var allAnimesUrls = animeAnchors.Select(anchor => anchor.EvaluateFunctionAsync<string>("a => a.href")).ToList();
+
+        foreach (var animeUrl in allAnimesUrls)
         {
-            string animeUrl = await NavigateToGivenAnimePage(page, animeAnchor);
+            string animeSubDomainUrl = await NavigateToGivenAnimePage(page, await animeUrl);
 
-            var seriesUrls = await GetAnimeSeriesUrls(page, animeUrl);
+            var seriesUrls = await GetAnimeSeriesUrlsAsync(page, animeSubDomainUrl);
 
-            ;
-
+            
         }
 
         return animes;
     }
 
-    private async Task<List<string>> GetAnimeSeriesUrls(IPage page, string animeUrl)
+    private async Task<List<string>> GetAnimeSeriesUrlsAsync(IPage page, string animeUrl)
     {
         var subMenus = await page.QuerySelectorAllAsync<HtmlElement>("div.pmenu_naglowek_b");
         var animeSeriesDiv = await GetFirstElementContainingText(subMenus, "Odcinki anime online");
 
         if (animeSeriesDiv is null)
+        {
+            _logger.Error("Couldn't find anime series html element, anime url: {anime_url}", animeUrl);
             throw new Exception("Couldn't find anime series html element");
+        }
 
         var animeSeriesSiblingList = await animeSeriesDiv.GetNextElementSiblingAsync<HtmlUnorderedListElement>();
 
         if (animeSeriesSiblingList is null)
+        {
+            _logger.Error("Couldn't find anime series list, anime url: {anime_url}", animeUrl);
             throw new Exception("Couldn't find anime series list");
+        }
+            
 
         var allListElements = await animeSeriesSiblingList.GetChildrenAsync<HtmlListItemElement>();
 
@@ -81,25 +89,42 @@ public class WebScrapper : IWebScrapper
                 var animeSeriesUrl = await animeSeriesAnchorElement.GetAttributeAsync("href");
 
                 if (string.IsNullOrWhiteSpace(animeSeriesUrl))
+                {
+                    _logger.Error("Couldn't find series url for: {anime_url}", animeUrl);
                     throw new Exception($"Couldn't find series url for: {animeUrl}");
-
+                }
+                    
                 allAnimeSeriesUrls.Add(animeSeriesUrl);
             }
         }
 
+        if (!allAnimeSeriesUrls.Any())
+        {
+            _logger.Warning("Didn't find any anime series, for the following anime: {anime_name}", animeUrl);
+            return allAnimeSeriesUrls;
+        }
+
+        _logger.Information("For anime: {anime_name}, found following anime series: {anime_series}", animeUrl, string.Join(", ", allAnimeSeriesUrls));
+
         return allAnimeSeriesUrls;
     }
 
-    private async Task<string> NavigateToGivenAnimePage(IPage page, IElementHandle animeAnchor)
+    private async Task<string> NavigateToGivenAnimePage(IPage page, string animeUrl)
     {
-        var animeUrl = await animeAnchor.EvaluateFunctionAsync<string>("a => a.href");
         await NavigateToPageAsync(page, animeUrl);
 
         var anchorElementForSubpageWithAnimeEpisodes = await page.QuerySelectorAsync("center a.sub_link");
         var urlToSubpageWithEpisodes = await anchorElementForSubpageWithAnimeEpisodes.EvaluateFunctionAsync<string>("a => a.href");
 
         await NavigateToPageAsync(page, urlToSubpageWithEpisodes);
-        return animeUrl;
+
+        if (string.IsNullOrWhiteSpace(urlToSubpageWithEpisodes))
+        {
+            _logger.Error("Couldn't find anime subdomain url: {animeUrl}", animeUrl);
+            throw new Exception($"Couldn't find anime subdomain url: {animeUrl}");
+        }
+            
+        return urlToSubpageWithEpisodes;
     }
 
     private async Task<HtmlElement?> GetFirstElementContainingText(HtmlElement[] elements, string innerText)
