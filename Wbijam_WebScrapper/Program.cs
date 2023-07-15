@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Wbijam.WebScrapper;
+using Wbijam.WebScrapper.Web;
 
 ILogger logger = new LoggerConfiguration()
     .MinimumLevel.Information()
@@ -12,6 +13,7 @@ var serviceCollection = new ServiceCollection();
 
 serviceCollection.AddSingleton(logger);
 serviceCollection.AddSingleton<IProcessRunner, ProcessRunner>();
+serviceCollection.AddSingleton<IWebScrapper, WebScrapper>();
 
 var serviceProvider = serviceCollection.BuildServiceProvider();
 

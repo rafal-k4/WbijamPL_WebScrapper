@@ -2,5 +2,5 @@
 
 public interface IWebScrapper
 {
-    Task<AnimeModel> GetAnimeData();
+    Task<List<AnimeModel>> GetAnimeDataAsync();
 }
