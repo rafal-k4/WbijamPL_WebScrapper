@@ -47,17 +47,45 @@ public class WebScrapper : IWebScrapper
 
         foreach (var animeUrl in allAnimesUrls)
         {
-            string animeSubDomainUrl = await NavigateToGivenAnimePage(page, await animeUrl);
+            string animeSubDomainUrl = await NavigateToGivenAnimePageAsync(page, await animeUrl);
 
-            var seriesUrls = await GetAnimeSeriesUrlsAsync(page, animeSubDomainUrl);
+            var animeModel = new AnimeModel();
+            animeModel.Title = await GetAnimeTitleAsync(page);
 
-            
+            var seriesUrlsaths = await GetAnimeSeriesUrlsPathsAsync(page, animeSubDomainUrl);
+
+            await PopulateAnimeEpisodesAsync(page, animeSubDomainUrl, seriesUrlsaths, animeModel);
         }
 
         return animes;
     }
 
-    private async Task<List<string>> GetAnimeSeriesUrlsAsync(IPage page, string animeUrl)
+    private async Task<string> GetAnimeTitleAsync(IPage page)
+    {
+        var pageTitle = await page.GetTitleAsync();
+
+        var animeTitle = pageTitle.Split("- wszystkie odcinki anime online");
+
+        if (!animeTitle.Any())
+        {
+            _logger.Error("Couldn't find anime title: {page_title}", pageTitle);
+            throw new Exception($"Couldn't find anime title: {pageTitle}");
+        }
+
+        return animeTitle[0];
+    }
+
+    private async Task PopulateAnimeEpisodesAsync(IPage page, string animeSubdomain, List<string> seriesUrls, AnimeModel animeModel)
+    {
+        foreach(var seriesUrl in seriesUrls)
+        {
+            await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), seriesUrl).ToString());
+
+
+        }
+    }
+
+    private async Task<List<string>> GetAnimeSeriesUrlsPathsAsync(IPage page, string animeUrl)
     {
         var subMenus = await page.QuerySelectorAllAsync<HtmlElement>("div.pmenu_naglowek_b");
         var animeSeriesDiv = await GetFirstElementContainingText(subMenus, "Odcinki anime online");
@@ -109,7 +137,7 @@ public class WebScrapper : IWebScrapper
         return allAnimeSeriesUrls;
     }
 
-    private async Task<string> NavigateToGivenAnimePage(IPage page, string animeUrl)
+    private async Task<string> NavigateToGivenAnimePageAsync(IPage page, string animeUrl)
     {
         await NavigateToPageAsync(page, animeUrl);
 

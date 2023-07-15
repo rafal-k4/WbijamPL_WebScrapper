@@ -2,4 +2,5 @@
 
 public class AnimeModel
 {
+    public string Title { get; internal set; }
 }
