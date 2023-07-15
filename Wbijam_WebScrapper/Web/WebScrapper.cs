@@ -54,7 +54,7 @@ public class WebScrapper : IWebScrapper
 
             var seriesUrlsaths = await GetAnimeSeriesUrlsPathsAsync(page, animeSubDomainUrl, animeModel);
 
-            await PopulateAnimeEpisodesAsync(page, animeSubDomainUrl, seriesUrlsaths, animeModel);
+            await PopulateAnimeEpisodesAsync(page, animeSubDomainUrl, animeModel);
 
             animes.Add(animeModel);
         }
@@ -77,29 +77,21 @@ public class WebScrapper : IWebScrapper
         return animeTitle[0];
     }
 
-    private async Task PopulateAnimeEpisodesAsync(IPage page, string animeSubdomain, List<string> seriesUrls, AnimeModel animeModel)
+    private async Task PopulateAnimeEpisodesAsync(IPage page, string animeSubdomain, AnimeModel animeModel)
     {
-        foreach(var seriesUrl in seriesUrls)
+        foreach(var animeSeries in animeModel.Series)
         {
-            var animeEpisode = new AnimeEpisode();
+            await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), animeSeries.SeriesUrlPath).ToString());
 
-            await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), seriesUrl).ToString());
+            var animeEpisode = new AnimeEpisode();
 
             var tableWithEpisodes = await page.QuerySelectorAsync<HtmlTableElement>("table.lista");
             var episodeRows = await tableWithEpisodes.GetRowsAsync().ToArrayAsync();
 
             if (!episodeRows.Any())
-                _logger.Warning("No episodes found for this anime: {animeName}, series: {seriesName}", animeModel.Title, seriesUrl);
+                _logger.Warning("No episodes found for this anime: {animeName}, series: {seriesName}", animeModel.Title, animeSeries.SeriesUrlPath);
 
-            var animeSeries = animeModel.Series.SingleOrDefault(x => x.SeriesUrlPath == seriesUrl);
-
-            if (animeSeries is null)
-            {
-                _logger.Error("Couldn't find previously fetched anime series by its name: {seriesPath}", seriesUrl);
-                throw new Exception($"Couldn't find previously fetched anime series by its name: {seriesUrl}");
-            }
-
-            foreach(var row in episodeRows)
+            foreach (var row in episodeRows)
             {
                 var columns = await row.GetCellsAsync().ToArrayAsync();
 
@@ -111,22 +103,33 @@ public class WebScrapper : IWebScrapper
                     throw new Exception($"Anime: {animeModel.Title}, series: {animeSeries.SeriesName}, does not contain required 3 columns containing - name, type and release date.");
                 }
 
-                animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
-                animeEpisode.EpisodeType = await columns[1].GetInnerTextAsync();
-                animeEpisode.EpisodeReleaseDate = DateTime.Parse(await columns[2].GetInnerTextAsync());
+                if (animeSeries.SeriesName.ToLowerInvariant() == "openingi"
+                    || animeSeries.SeriesName.ToLowerInvariant() == "endingi")
+                {
+                    animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
+                    animeEpisode.RangeOfOpeningOrEndings = await columns[1].GetInnerTextAsync();
+                    animeEpisode.EpisodeType = await columns[2].GetInnerTextAsync();
+                    
+                } else
+                {
+                    animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
+                    animeEpisode.EpisodeType = await columns[1].GetInnerTextAsync();
+                    animeEpisode.EpisodeReleaseDate = DateTime.Parse(await columns[2].GetInnerTextAsync());
+                }
 
                 var episodePlayerUrlAnchorElement = await columns[0].QuerySelectorAsync<HtmlAnchorElement>("a");
                 animeEpisode.EpisodePlayersUrlPath = await episodePlayerUrlAnchorElement.GetAttributeAsync<string>("href");
 
-                animeEpisode.EpisodeVideoUrls = await GetAnimeEpisodes(
+                
+            }
+
+            animeEpisode.EpisodeVideoUrls = await GetAnimeEpisodes(
                     page,
                     animeSubdomain,
                     animeEpisode.EpisodePlayersUrlPath,
-                    animeEpisode.EpisodeName, 
+                    animeEpisode.EpisodeName,
                     animeModel.Title,
                     animeSeries.SeriesName);
-            }
-
 
             animeSeries.AnimeEpisodes.Add(animeEpisode);
         }
