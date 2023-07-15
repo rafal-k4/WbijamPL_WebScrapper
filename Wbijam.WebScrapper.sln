@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.2.32602.215
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wbijam_WebScrapper", "Wbijam_WebScrapper\Wbijam_WebScrapper.csproj", "{A9EBD5C6-B62A-4279-83BE-1E22E47F20D7}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Wbijam.WebScrapper", "Wbijam_WebScrapper\Wbijam.WebScrapper.csproj", "{A9EBD5C6-B62A-4279-83BE-1E22E47F20D7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -1,4 +1,4 @@
-﻿namespace Wbijam_WebScrapper;
+﻿namespace Wbijam.WebScrapper;
 
 public interface IProcessRunner
 {
