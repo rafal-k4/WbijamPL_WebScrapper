@@ -6,7 +6,8 @@ public class AnimeEpisode
     public string EpisodeType { get; set; } = null!;
     public string? EpisodeReleaseDateOrRangeOfEpisodes { get; set; }
 
-    public string EpisodePlayersUrlPath { get; set; } = null!;
+    internal string EpisodePlayersUrlPath { get; set; } = null!;
+    internal List<string> PlayersUrlPaths { get; set; } = new();
     public List<string> EpisodeVideoUrls { get; set; } = new();
     
 }

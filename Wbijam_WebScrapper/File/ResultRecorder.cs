@@ -59,7 +59,15 @@ public class ResultRecorder : IResultRecorder
 
                     foreach (var url in episode.EpisodeVideoUrls)
                     {
-                        worksheet.Cells[currentRowIndex, currentColumnIndex].Hyperlink = new Uri(url);
+                        if (url.Contains("VKontakte"))
+                        {
+                            worksheet.Cells[currentRowIndex, currentColumnIndex].Value = url;
+                        }
+                        else 
+                        {
+                            worksheet.Cells[currentRowIndex, currentColumnIndex].Hyperlink = new Uri(url);
+                        }
+                        
                         currentColumnIndex++;
                     }
 
@@ -72,7 +80,7 @@ public class ResultRecorder : IResultRecorder
             worksheet.Columns[3].AutoFit();
         }
 
-        await package.SaveAsAsync(new FileInfo(Path.Combine(RESULT_DIR, $"{DateTime.Now:yyyyMMdd}_anime.xlsx")));
+        await package.SaveAsAsync(new FileInfo(Path.Combine(RESULT_DIR, $"{DateTime.Now:yyyyMMdd_HHmmss}_anime.xlsx")));
     }
 
     private static void CreateHeaderRow(int headerRow, int titleColumn, int typeColumn, int dateReleaseColumn, int urlsColumn, ExcelWorksheet worksheet)
