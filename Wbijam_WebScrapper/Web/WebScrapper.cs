@@ -1,5 +1,6 @@
 ﻿using Polly;
 using Polly.Retry;
+using Polly.Wrap;
 using PuppeteerSharp;
 using PuppeteerSharp.Dom;
 using Serilog;
@@ -11,7 +12,8 @@ public class WebScrapper : IWebScrapper
     private const string WBIJAM_URL = @"https://wbijam.pl/";
     private readonly ILogger _logger;
 
-    private AsyncRetryPolicy _retryNavigationPolicy; 
+    private AsyncRetryPolicy _retryNavigationPolicy;
+    private AsyncPolicyWrap<string?> _retryPolicyForScrappingVideoSrc;
 
     public WebScrapper(ILogger logger)
     {
@@ -26,6 +28,25 @@ public class WebScrapper : IWebScrapper
               }, (exception, timeSpan, retryCount, context) => {
                   _logger.Error("Retry attempt: {retryCount} - Encountered exception while trying to navigate to page: {url}", retryCount, context["url"]);
               });
+
+        var scrappingVideoPlayerSourceUriRetryPolicy = Policy.Handle<VideoSrcUrlNotFound>()
+           .WaitAndRetryAsync(new[]
+             {
+                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(3),
+                TimeSpan.FromSeconds(4)
+             }, (exception, timeSpan, retryCount, context) => {
+                 _logger.Error("Retry attempt: {retryCount} - Didn't find video element for this episode: {episodeName}, anime name: {animeName}, series: {seriesName}", retryCount, context["episodeName"], context["animeName"], context["seriesName"]);
+             });
+
+        var fallbackPolicy = Policy<string?>.Handle<VideoSrcUrlNotFound>()
+            .FallbackAsync<string?>((string?)null, onFallbackAsync: (result, context) =>
+            {
+                _logger.Warning("Failed to get video source url - episode: {episodeName}, anime name: {animeName}, series: {seriesName}", context["episodeName"], context["animeName"], context["seriesName"]);
+                return Task.CompletedTask;
+            });
+
+        _retryPolicyForScrappingVideoSrc = fallbackPolicy.WrapAsync<string?>(scrappingVideoPlayerSourceUriRetryPolicy);
     }
 
     public async Task<List<AnimeModel>> GetAnimeDataAsync()
@@ -194,8 +215,6 @@ public class WebScrapper : IWebScrapper
 
     private async Task<string?> GetVideoPlayerUrl(IPage page, string playerPageUrl, string episodeName, string title, string seriesName)
     {
-        const int retriesCount = 4;
-
         await NavigateToPageAsync(page, playerPageUrl, true);
 
         var warningMessageElement = await page.QuerySelectorAsync<HtmlElement>("center");
@@ -207,23 +226,28 @@ public class WebScrapper : IWebScrapper
                 return "VKontakte player -> https://vk.com/";
         }
 
-        for (var tryCount = 1; tryCount <= retriesCount; tryCount++)
+        Dictionary<string, object> retryContextData = new()
+        {
+            { "episodeName", episodeName },
+            { "animeName", title },
+            { "seriesName", seriesName },
+        };
+
+        return await _retryPolicyForScrappingVideoSrc.ExecuteAsync(_ => GetVideoPlayerSourceUrl(page), retryContextData);
+
+        async Task<string?> GetVideoPlayerSourceUrl(IPage page)
         {
             var videoIframe = await page.QuerySelectorAsync<HtmlElement>("iframe");
-            
+
             if (videoIframe is null)
             {
-                _logger.Warning("Try counter: {tryCount} - Didn't found video element for this episode: {episodeName}, anime name: {animeName}, series: {seriesName}", tryCount, episodeName, title, seriesName);
-                await Task.Delay(1000);
-                continue;
+                throw new VideoSrcUrlNotFound();
             }
 
             var videoPlayerBaseUrl = await videoIframe.GetAttributeAsync<string>("src");
 
             return videoPlayerBaseUrl;
         }
-
-        return null;
     }
 
     private async Task<List<string>> GetAnimeSeriesUrlsPathsAsync(IPage page, string animeUrl, AnimeModel animeModel)
@@ -245,7 +269,6 @@ public class WebScrapper : IWebScrapper
             throw new Exception("Couldn't find anime series list");
         }
             
-
         var allListElements = await animeSeriesSiblingList.GetChildrenAsync<HtmlListItemElement>();
 
         var allAnimeSeriesUrls = new List<KeyValuePair<string, string>>();
@@ -322,16 +345,17 @@ public class WebScrapper : IWebScrapper
 
         await Task.Delay(delayMiliseconds); // not sure if it can block IP due to bot traversing pages
 
-        Dictionary<string, object> contextData = new()
+        Dictionary<string, object> retryContextData = new()
         {
             { "url", url }
         };
+
         if (waitUntilNetworkIdle)
         {
-            await _retryNavigationPolicy.ExecuteAsync(_ => page.GoToAsync(url, WaitUntilNavigation.Networkidle0), contextData);
+            await _retryNavigationPolicy.ExecuteAsync(_ => page.GoToAsync(url, WaitUntilNavigation.Networkidle0), retryContextData);
         } else
         {
-            await _retryNavigationPolicy.ExecuteAsync(_ => page.GoToAsync(url), contextData);
+            await _retryNavigationPolicy.ExecuteAsync(_ => page.GoToAsync(url), retryContextData);
         }    
     }
 }
