@@ -4,5 +4,5 @@ namespace Wbijam.WebScrapper.File;
 
 public interface IResultRecorder
 {
-    Task SaveResult(List<AnimeModel> scrappedAnimes);
+    Task SaveResult(AnimeModel scrappedAnime);
 }

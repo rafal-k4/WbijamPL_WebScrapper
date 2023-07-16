@@ -2,5 +2,5 @@
 
 public interface IWebScrapper
 {
-    Task<List<AnimeModel>> GetAnimeDataAsync();
+    Task GetAnimeDataAsync(Func<AnimeModel, Task> scrappedAnimeDelegate);
 }

@@ -49,7 +49,7 @@ public class WebScrapper : IWebScrapper
         _retryPolicyForScrappingVideoSrc = fallbackPolicy.WrapAsync<string?>(scrappingVideoPlayerSourceUriRetryPolicy);
     }
 
-    public async Task<List<AnimeModel>> GetAnimeDataAsync()
+    public async Task GetAnimeDataAsync(Func<AnimeModel, Task> scrappedAnimeDelegate)
     {
         _logger.Information("Starting headless browser...");
         using var browserFetcher = new BrowserFetcher();
@@ -61,7 +61,7 @@ public class WebScrapper : IWebScrapper
         await page.GoToAsync(WBIJAM_URL);
 
         var animeAnchors = await GetAnimesUrls(page);
-        return await NavigateAndWebScrapAnimesData(page, animeAnchors);
+        await NavigateAndWebScrapAnimesData(page, animeAnchors, scrappedAnimeDelegate);
     }
 
     private static async Task<IElementHandle[]> GetAnimesUrls(IPage page)
@@ -72,10 +72,8 @@ public class WebScrapper : IWebScrapper
         return animeAnchors;
     }
 
-    private async Task<List<AnimeModel>> NavigateAndWebScrapAnimesData(IPage page, IElementHandle[] animeAnchors)
+    private async Task NavigateAndWebScrapAnimesData(IPage page, IElementHandle[] animeAnchors, Func<AnimeModel, Task> func)
     {
-        var animes = new List<AnimeModel>();
-
         _logger.Information("{anime_count} animes found", animeAnchors.Length);
 
         var allAnimesUrls = animeAnchors.Select(anchor => anchor.EvaluateFunctionAsync<string>("a => a.href")).ToList();
@@ -101,6 +99,8 @@ public class WebScrapper : IWebScrapper
                         _logger.Warning("Other anime {animeName} doesn't have correlating subpage url", otherAnime.Title);
 
                     await PopulateAnimeEpisodesAsync(page, new Uri(new Uri(animeSubDomainUrl), otherAnime.SeriesPagesPaths[0]).ToString(), otherAnime, isOtherAnimeSection);
+
+                    await func(otherAnime);
                 }
             } else
             {
@@ -108,12 +108,9 @@ public class WebScrapper : IWebScrapper
                 await PopulateAnimeSeriesUrlsPathsAsync(page, animeSubDomainUrl, animeModel);
                 await PopulateAnimeEpisodesAsync(page, animeSubDomainUrl, animeModel);
 
-                animes.Add(animeModel);
+                await func(animeModel);
             }
-            
         }
-
-        return animes;
     }
 
     private async Task<string> GetAnimeTitleAsync(IPage page)

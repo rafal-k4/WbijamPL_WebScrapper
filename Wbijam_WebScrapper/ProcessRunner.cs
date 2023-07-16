@@ -27,9 +27,11 @@ public class ProcessRunner : IProcessRunner
     {
         var stopwatch = Stopwatch.StartNew();
 
-        var scrappedAnimes = await _webScrapper.GetAnimeDataAsync();
-        await _resultRecorder.SaveResult(scrappedAnimes);
-
+        await _webScrapper.GetAnimeDataAsync(async anime =>
+        {
+            await _resultRecorder.SaveResult(anime);
+        });
+        
         stopwatch.Stop();
         _logger.Information("Whole process took: {elapsedTime}",
            TimeSpan.FromMilliseconds(stopwatch.ElapsedMilliseconds).Humanize(5, new System.Globalization.CultureInfo("en")));
