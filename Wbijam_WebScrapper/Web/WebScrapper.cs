@@ -142,14 +142,14 @@ public class WebScrapper : IWebScrapper
                     || animeSeries.SeriesName.ToLowerInvariant() == "endingi")
                 {
                     animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
-                    animeEpisode.RangeOfOpeningOrEndings = await columns[1].GetInnerTextAsync();
+                    animeEpisode.EpisodeReleaseDateOrRangeOfEpisodes = await columns[1].GetInnerTextAsync();
                     animeEpisode.EpisodeType = await columns[2].GetInnerTextAsync();
                     
                 } else
                 {
                     animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
                     animeEpisode.EpisodeType = await columns[1].GetInnerTextAsync();
-                    animeEpisode.EpisodeReleaseDate = await columns[2].GetInnerTextAsync();
+                    animeEpisode.EpisodeReleaseDateOrRangeOfEpisodes = await columns[2].GetInnerTextAsync();
                 }
 
                 var episodePlayerUrlAnchorElement = await columns[0].QuerySelectorAsync<HtmlAnchorElement>("a");

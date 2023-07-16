@@ -2,6 +2,6 @@
 
 public class AnimeModel
 {
-    public string Title { get; internal set; } = null!;
-    internal List<AnimeSeries> Series { get; set; } = new();
+    public string Title { get; set; } = null!;
+    public List<AnimeSeries> Series { get; set; } = new();
 }
