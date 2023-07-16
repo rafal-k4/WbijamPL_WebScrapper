@@ -1,4 +1,6 @@
-﻿using PuppeteerSharp;
+﻿using Polly;
+using Polly.Retry;
+using PuppeteerSharp;
 using PuppeteerSharp.Dom;
 using Serilog;
 
@@ -9,9 +11,21 @@ public class WebScrapper : IWebScrapper
     private const string WBIJAM_URL = @"https://wbijam.pl/";
     private readonly ILogger _logger;
 
+    private AsyncRetryPolicy _retryNavigationPolicy; 
+
     public WebScrapper(ILogger logger)
     {
         _logger = logger;
+
+        _retryNavigationPolicy = Policy.Handle<NavigationException>()
+            .WaitAndRetryAsync(new[]
+              {
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(30)
+              }, (exception, timeSpan, retryCount, context) => {
+                  _logger.Error("Retry attempt: {retryCount} - Encountered exception while trying to navigate to page: {url}", retryCount, context["url"]);
+              });
     }
 
     public async Task<List<AnimeModel>> GetAnimeDataAsync()
@@ -83,8 +97,6 @@ public class WebScrapper : IWebScrapper
         {
             await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), animeSeries.SeriesUrlPath).ToString());
 
-            var animeEpisode = new AnimeEpisode();
-
             var tableWithEpisodes = await page.QuerySelectorAsync<HtmlTableElement>("table.lista");
             var episodeRows = await tableWithEpisodes.GetRowsAsync().ToArrayAsync();
 
@@ -92,7 +104,7 @@ public class WebScrapper : IWebScrapper
                 _logger.Warning("No episodes found for this anime: {animeName}, series: {seriesName}", animeModel.Title, animeSeries.SeriesUrlPath);
 
             foreach (var row in episodeRows)
-            {
+            { 
                 var columns = await row.GetCellsAsync().ToArrayAsync();
 
                 if (columns.Length < 3)
@@ -102,6 +114,8 @@ public class WebScrapper : IWebScrapper
                         animeSeries.SeriesName);
                     throw new Exception($"Anime: {animeModel.Title}, series: {animeSeries.SeriesName}, does not contain required 3 columns containing - name, type and release date.");
                 }
+
+                var animeEpisode = new AnimeEpisode();
 
                 if (animeSeries.SeriesName.ToLowerInvariant() == "openingi"
                     || animeSeries.SeriesName.ToLowerInvariant() == "endingi")
@@ -114,25 +128,26 @@ public class WebScrapper : IWebScrapper
                 {
                     animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
                     animeEpisode.EpisodeType = await columns[1].GetInnerTextAsync();
-                    animeEpisode.EpisodeReleaseDate = DateTime.Parse(await columns[2].GetInnerTextAsync());
+                    animeEpisode.EpisodeReleaseDate = await columns[2].GetInnerTextAsync();
                 }
 
                 var episodePlayerUrlAnchorElement = await columns[0].QuerySelectorAsync<HtmlAnchorElement>("a");
                 animeEpisode.EpisodePlayersUrlPath = await episodePlayerUrlAnchorElement.GetAttributeAsync<string>("href");
 
-                
+                animeSeries.AnimeEpisodes.Add(animeEpisode);
             }
 
-            animeEpisode.EpisodeVideoUrls = await GetAnimeEpisodes(
+            foreach (var episode in animeSeries.AnimeEpisodes)
+            {
+                episode.EpisodeVideoUrls = await GetAnimeEpisodes(
                     page,
                     animeSubdomain,
-                    animeEpisode.EpisodePlayersUrlPath,
-                    animeEpisode.EpisodeName,
+                    episode.EpisodePlayersUrlPath,
+                    episode.EpisodeName,
                     animeModel.Title,
                     animeSeries.SeriesName);
-
-            animeSeries.AnimeEpisodes.Add(animeEpisode);
-        }
+            }
+        }        
     }
 
     private async Task<List<string>> GetAnimeEpisodes(IPage page, string animeSubdomain, string episodePlayersUrl, string episodeName, string title, string seriesName)
@@ -184,8 +199,7 @@ public class WebScrapper : IWebScrapper
         await NavigateToPageAsync(page, playerPageUrl, true);
 
         var warningMessageElement = await page.QuerySelectorAsync<HtmlElement>("center");
-        if (playerPageUrl == "https://86.wbijam.pl/odtwarzacz-zhrrdrCxxau6natS_UK_5Wgmx1h3gnchB8Gf7CsOp7zv5I=.html")
-            ;
+        
         if (warningMessageElement != null)
         {
             var warningMessage = await warningMessageElement.GetInnerTextAsync();
@@ -210,12 +224,6 @@ public class WebScrapper : IWebScrapper
         }
 
         return null;
-    }
-
-    private async Task NavigateBack(IPage page)
-    {
-        _logger.Information("Navigating to previous page");
-        await page.GoBackAsync();
     }
 
     private async Task<List<string>> GetAnimeSeriesUrlsPathsAsync(IPage page, string animeUrl, AnimeModel animeModel)
@@ -311,15 +319,19 @@ public class WebScrapper : IWebScrapper
     {
         const int delayMiliseconds = 500;
         _logger.Information("Navigatin to page: {anime_web_page}", url);
+
         await Task.Delay(delayMiliseconds); // not sure if it can block IP due to bot traversing pages
+
+        Dictionary<string, object> contextData = new()
+        {
+            { "url", url }
+        };
         if (waitUntilNetworkIdle)
         {
-            await page.GoToAsync(url, WaitUntilNavigation.Networkidle0);
+            await _retryNavigationPolicy.ExecuteAsync(_ => page.GoToAsync(url, WaitUntilNavigation.Networkidle0), contextData);
         } else
         {
-            await page.GoToAsync(url);
-        }
-            
-            
+            await _retryNavigationPolicy.ExecuteAsync(_ => page.GoToAsync(url), contextData);
+        }    
     }
 }
