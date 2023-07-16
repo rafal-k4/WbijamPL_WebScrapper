@@ -14,7 +14,7 @@ var serviceCollection = new ServiceCollection();
 
 serviceCollection.AddSingleton(logger);
 serviceCollection.AddSingleton<IProcessRunner, ProcessRunner>();
-serviceCollection.AddSingleton<IWebScrapper, StubWebScrapper>();
+serviceCollection.AddSingleton<IWebScrapper, WebScrapper>();
 serviceCollection.AddSingleton<IResultRecorder, ResultRecorder>();
 
 var serviceProvider = serviceCollection.BuildServiceProvider();

@@ -78,20 +78,41 @@ public class WebScrapper : IWebScrapper
 
         _logger.Information("{anime_count} animes found", animeAnchors.Length);
 
-        var allAnimesUrls = animeAnchors.Select(anchor => anchor.EvaluateFunctionAsync<string>("a => a.href")).ToList();
-
+        //var allAnimesUrls = animeAnchors.Select(anchor => anchor.EvaluateFunctionAsync<string>("a => a.href")).ToList();
+        var allAnimesUrls = new[] { 
+            //Task.FromResult("https://wbijam.pl/anime-mashle.html"), 
+            Task.FromResult("https://inne.wbijam.pl/") };
         foreach (var animeUrl in allAnimesUrls)
         {
-            string animeSubDomainUrl = await NavigateToGivenAnimePageAsync(page, await animeUrl);
+            var isOtherAnimeSection = (await animeUrl).Contains("inne.wbijam.pl");
+
+            string animeSubDomainUrl = isOtherAnimeSection 
+                ? await animeUrl
+                : await NavigateToGivenAnimePageAsync(page, await animeUrl);
 
             var animeModel = new AnimeModel();
-            animeModel.Title = await GetAnimeTitleAsync(page);
 
-            var seriesUrlsaths = await GetAnimeSeriesUrlsPathsAsync(page, animeSubDomainUrl, animeModel);
+            if(isOtherAnimeSection)
+            {
+                await NavigateToPageAsync(page, animeSubDomainUrl);
+                List<AnimeModel> otherAnimes = await GetOtherAnimesPagePathsAsync(page, animeSubDomainUrl);
+                
+                foreach(var otherAnime in otherAnimes)
+                {
+                    if (!otherAnime.SeriesPagesPaths.Any())
+                        _logger.Warning("Other anime {animeName} doesn't have correlating subpage url", otherAnime.Title);
 
-            await PopulateAnimeEpisodesAsync(page, animeSubDomainUrl, animeModel);
+                    await PopulateAnimeEpisodesAsync(page, new Uri(new Uri(animeSubDomainUrl), otherAnime.SeriesPagesPaths[0]).ToString(), otherAnime);
+                }
+            } else
+            {
+                animeModel.Title = await GetAnimeTitleAsync(page);
+                await PopulateAnimeSeriesUrlsPathsAsync(page, animeSubDomainUrl, animeModel);
+                await PopulateAnimeEpisodesAsync(page, animeSubDomainUrl, animeModel);
 
-            animes.Add(animeModel);
+                animes.Add(animeModel);
+            }
+            
         }
 
         return animes;
@@ -114,64 +135,99 @@ public class WebScrapper : IWebScrapper
 
     private async Task PopulateAnimeEpisodesAsync(IPage page, string animeSubdomain, AnimeModel animeModel)
     {
-        foreach(var animeSeries in animeModel.Series)
+        foreach (var animeSeriesPagePath in animeModel.SeriesPagesPaths)
         {
-            await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), animeSeries.SeriesUrlPath).ToString());
+            await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), animeSeriesPagePath).ToString());
 
-            var tableWithEpisodes = await page.QuerySelectorAsync<HtmlTableElement>("table.lista");
-            var episodeRows = await tableWithEpisodes.GetRowsAsync().ToArrayAsync();
+            var seriesHeaders = await page.QuerySelectorAllAsync<HtmlHeadingElement>("h1.pod_naglowek");
 
-            if (!episodeRows.Any())
-                _logger.Warning("No episodes found for this anime: {animeName}, series: {seriesName}", animeModel.Title, animeSeries.SeriesUrlPath);
-
-            foreach (var row in episodeRows)
-            { 
-                var columns = await row.GetCellsAsync().ToArrayAsync();
-
-                if (columns.Length < 3)
-                {
-                    _logger.Error("Anime: {anime_name}, series: {anime_series}, does not contain required 3 columns containing - name, type and release date.",
-                        animeModel.Title,
-                        animeSeries.SeriesName);
-                    throw new Exception($"Anime: {animeModel.Title}, series: {animeSeries.SeriesName}, does not contain required 3 columns containing - name, type and release date.");
-                }
-
-                var animeEpisode = new AnimeEpisode();
-
-                if (animeSeries.SeriesName.ToLowerInvariant() == "openingi"
-                    || animeSeries.SeriesName.ToLowerInvariant() == "endingi")
-                {
-                    animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
-                    animeEpisode.EpisodeReleaseDateOrRangeOfEpisodes = await columns[1].GetInnerTextAsync();
-                    animeEpisode.EpisodeType = await columns[2].GetInnerTextAsync();
-                    
-                } else
-                {
-                    animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
-                    animeEpisode.EpisodeType = await columns[1].GetInnerTextAsync();
-                    animeEpisode.EpisodeReleaseDateOrRangeOfEpisodes = await columns[2].GetInnerTextAsync();
-                }
-
-                var episodePlayerUrlAnchorElement = await columns[0].QuerySelectorAsync<HtmlAnchorElement>("a");
-                animeEpisode.EpisodePlayersUrlPath = await episodePlayerUrlAnchorElement.GetAttributeAsync<string>("href");
-
-                animeSeries.AnimeEpisodes.Add(animeEpisode);
-            }
-
-            foreach (var episode in animeSeries.AnimeEpisodes)
+            foreach(var header in seriesHeaders)
             {
-                episode.EpisodeVideoUrls = await GetAnimeEpisodes(
+                var animeSeries = new AnimeSeries
+                {
+                    SeriesName = await header.GetInnerTextAsync(),
+                    SeriesUrlPath = animeSeriesPagePath
+                };
+
+                var tableWithEpisodes = await header.GetNextElementSiblingAsync<HtmlTableElement>();
+
+                if (tableWithEpisodes is null)
+                {
+                    _logger.Warning("Didn't find any sibling element next to a header series: {seriesName}, in anime: {animeName}", animeSeries.SeriesName, animeModel.Title);
+                    continue;
+                }
+
+                var episodeRows = await tableWithEpisodes.GetRowsAsync().ToArrayAsync();
+
+                if (!episodeRows.Any())
+                    _logger.Warning("No episodes found for this anime: {animeName}, series: {seriesName}", animeModel.Title, animeSeriesPagePath);
+
+                var animeEpisodes = await GetAnimeEpisodes(animeModel, animeSeries.SeriesName, episodeRows);
+
+                animeSeries.AnimeEpisodes = animeEpisodes;
+
+                animeModel.Series.Add(animeSeries);
+            }
+        }
+
+        foreach(var series in animeModel.Series)
+        {
+            foreach (var episode in series.AnimeEpisodes)
+            {
+                episode.EpisodeVideoUrls = await GetAnimeEpisodesUrls(
                     page,
                     animeSubdomain,
                     episode.EpisodePlayersUrlPath,
                     episode.EpisodeName,
                     animeModel.Title,
-                    animeSeries.SeriesName);
+                    series.SeriesName);
             }
-        }        
+        }
     }
 
-    private async Task<List<string>> GetAnimeEpisodes(IPage page, string animeSubdomain, string episodePlayersUrl, string episodeName, string title, string seriesName)
+    private async Task<List<AnimeEpisode>> GetAnimeEpisodes(AnimeModel animeModel, string seriesName, HtmlTableRowElement[] episodeRows)
+    {
+        var animeEpisodes = new List<AnimeEpisode>();
+
+        foreach (var row in episodeRows)
+        {
+            var columns = await row.GetCellsAsync().ToArrayAsync();
+
+            if (columns.Length < 3)
+            {
+                _logger.Error("Anime: {anime_name}, series: {anime_series}, does not contain required 3 columns containing - name, type and release date.",
+                    animeModel.Title,
+                    seriesName);
+                throw new Exception($"Anime: {animeModel.Title}, series: {seriesName}, does not contain required 3 columns containing - name, type and release date.");
+            }
+
+            var animeEpisode = new AnimeEpisode();
+
+            if (seriesName.ToLowerInvariant() == "openingi"
+                || seriesName.ToLowerInvariant() == "endingi")
+            {
+                animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
+                animeEpisode.EpisodeReleaseDateOrRangeOfEpisodes = await columns[1].GetInnerTextAsync();
+                animeEpisode.EpisodeType = await columns[2].GetInnerTextAsync();
+
+            }
+            else
+            {
+                animeEpisode.EpisodeName = await columns[0].GetInnerTextAsync();
+                animeEpisode.EpisodeType = await columns[1].GetInnerTextAsync();
+                animeEpisode.EpisodeReleaseDateOrRangeOfEpisodes = await columns[2].GetInnerTextAsync();
+            }
+
+            var episodePlayerUrlAnchorElement = await columns[0].QuerySelectorAsync<HtmlAnchorElement>("a");
+            animeEpisode.EpisodePlayersUrlPath = await episodePlayerUrlAnchorElement.GetAttributeAsync<string>("href");
+
+            animeEpisodes.Add(animeEpisode);
+        }
+
+        return animeEpisodes;
+    }
+
+    private async Task<List<string>> GetAnimeEpisodesUrls(IPage page, string animeSubdomain, string episodePlayersUrl, string episodeName, string title, string seriesName)
     {
         var playersUrls = new List<string>();
         await NavigateToPageAsync(page, new Uri(new Uri(animeSubdomain), episodePlayersUrl).ToString());
@@ -250,10 +306,41 @@ public class WebScrapper : IWebScrapper
         }
     }
 
-    private async Task<List<string>> GetAnimeSeriesUrlsPathsAsync(IPage page, string animeUrl, AnimeModel animeModel)
+    private async Task<List<AnimeModel>> GetOtherAnimesPagePathsAsync(IPage page, string animeUrl)
+    {
+        const string firstPartOfOtherAnimes = "Akcja";
+        List<KeyValuePair<string, string>> allAnimeSeriesUrls = await GetSubmenuPagePathsByTextContent(page, animeUrl, firstPartOfOtherAnimes);
+        const string secondPartOfOtherAnimes = "Lżejsze klimaty";
+        allAnimeSeriesUrls.AddRange(await GetSubmenuPagePathsByTextContent(page, animeUrl, secondPartOfOtherAnimes));
+
+        var animes = allAnimeSeriesUrls.Select(x => new AnimeModel
+        {
+            Title = x.Value,
+            SeriesPagesPaths = new List<string> { x.Key }
+        }).ToList();
+
+        return animes;
+    }
+
+    private async Task PopulateAnimeSeriesUrlsPathsAsync(IPage page, string animeUrl, AnimeModel animeModel)
+    {
+        const string subMenuText = "Odcinki anime online";
+        List<KeyValuePair<string, string>> allAnimeSeriesUrls = await GetSubmenuPagePathsByTextContent(page, animeUrl, subMenuText);
+
+        if (!allAnimeSeriesUrls.Any())
+        {
+            _logger.Warning("Didn't find any anime series, for the following anime: {anime_name}", animeUrl);
+        }
+
+        _logger.Information("For anime: {anime_name}, found following anime series: {anime_series}", animeUrl, string.Join(", ", allAnimeSeriesUrls));
+
+        animeModel.SeriesPagesPaths = allAnimeSeriesUrls.Select(x => x.Key).ToList();
+    }
+
+    private async Task<List<KeyValuePair<string, string>>> GetSubmenuPagePathsByTextContent(IPage page, string animeUrl, string subMenuText)
     {
         var subMenus = await page.QuerySelectorAllAsync<HtmlElement>("div.pmenu_naglowek_b");
-        var animeSeriesDiv = await GetFirstElementContainingText(subMenus, "Odcinki anime online");
+        var animeSeriesDiv = await GetFirstElementContainingText(subMenus, subMenuText);
 
         if (animeSeriesDiv is null)
         {
@@ -268,7 +355,13 @@ public class WebScrapper : IWebScrapper
             _logger.Error("Couldn't find anime series list, anime url: {anime_url}", animeUrl);
             throw new Exception("Couldn't find anime series list");
         }
-            
+
+        List<KeyValuePair<string, string>> allAnimeSeriesUrls = await GetSeriesUrlsFromUnorderedList(animeUrl, animeSeriesSiblingList);
+        return allAnimeSeriesUrls;
+    }
+
+    private async Task<List<KeyValuePair<string, string>>> GetSeriesUrlsFromUnorderedList(string animeUrl, HtmlUnorderedListElement? animeSeriesSiblingList)
+    {
         var allListElements = await animeSeriesSiblingList.GetChildrenAsync<HtmlListItemElement>();
 
         var allAnimeSeriesUrls = new List<KeyValuePair<string, string>>();
@@ -292,21 +385,7 @@ public class WebScrapper : IWebScrapper
             }
         }
 
-        if (!allAnimeSeriesUrls.Any())
-        {
-            _logger.Warning("Didn't find any anime series, for the following anime: {anime_name}", animeUrl);
-            return allAnimeSeriesUrls.Select(x => x.Key).ToList();
-        }
-
-        _logger.Information("For anime: {anime_name}, found following anime series: {anime_series}", animeUrl, string.Join(", ", allAnimeSeriesUrls));
-
-        animeModel.Series = allAnimeSeriesUrls.Select(x => new AnimeSeries
-        {
-            SeriesName = x.Value,
-            SeriesUrlPath = x.Key
-        }).ToList();
-
-        return allAnimeSeriesUrls.Select(x => x.Key).ToList();
+        return allAnimeSeriesUrls;
     }
 
     private async Task<string> NavigateToGivenAnimePageAsync(IPage page, string animeUrl)
@@ -340,10 +419,7 @@ public class WebScrapper : IWebScrapper
 
     private async Task NavigateToPageAsync(IPage page, string url, bool waitUntilNetworkIdle = false)
     {
-        const int delayMiliseconds = 500;
         _logger.Information("Navigatin to page: {anime_web_page}", url);
-
-        await Task.Delay(delayMiliseconds); // not sure if it can block IP due to bot traversing pages
 
         Dictionary<string, object> retryContextData = new()
         {
