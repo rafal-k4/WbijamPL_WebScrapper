@@ -13,13 +13,14 @@ ILogger logger = new LoggerConfiguration()
 var serviceCollection = new ServiceCollection();
 
 serviceCollection.AddSingleton(logger);
-serviceCollection.AddSingleton<IProcessRunner, ProcessRunner>();
-serviceCollection.AddSingleton<IWebScrapper, WebScrapper>();
-serviceCollection.AddSingleton<IResultRecorder, ResultRecorder>();
+serviceCollection.AddScoped<IProcessRunner, ProcessRunner>();
+serviceCollection.AddScoped<IWebScrapper, WebScrapper>();
+serviceCollection.AddScoped<IResultRecorder, ResultRecorder>();
 
 var serviceProvider = serviceCollection.BuildServiceProvider();
 
-var processRunner = serviceProvider.GetRequiredService<IProcessRunner>();
+await using var scope = serviceProvider.CreateAsyncScope();
+var processRunner = scope.ServiceProvider.GetRequiredService<IProcessRunner>();
 
 try
 {
