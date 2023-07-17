@@ -8,8 +8,7 @@ namespace Wbijam.WebScrapper.File;
 
 public class ResultRecorder : IResultRecorder
 {
-    const string BASE_PATH = @"E:\DEV\Temp\Scrapped_Anime_RESULT";
-    private readonly string _resultDirectoryPath;
+    const string _resultDirectoryPath = @"E:\DEV\Temp\Scrapped_Anime_RESULT";
     private readonly ILogger _logger;
 
     public ResultRecorder(ILogger logger)
@@ -17,17 +16,6 @@ public class ResultRecorder : IResultRecorder
         _logger = logger;
 
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-        var resultDirectoryName = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var resultDirectoryPath = Path.Combine(BASE_PATH, resultDirectoryName);
-
-        if (!Directory.Exists(resultDirectoryPath))
-        {
-            Directory.CreateDirectory(resultDirectoryPath);
-            _logger.Information("Created output result directory: {directoryPath}", resultDirectoryPath);
-        }
-
-        _resultDirectoryPath = resultDirectoryPath;   
     }
 
     public async Task SaveResult(AnimeModel scrappedAnime)
